@@ -1,85 +1,112 @@
-# Baseline
+# Baseline Results
 
-## Core Web Vitals
+## Summary
 
-I ran Lighthouse on the homepage to get a starting point. The page doesn't shift around
-and it reacts fine once it's up, but the main content shows up way too late, so the
-performance score ends up low.
+The homepage is a mixed bag. On desktop it's actually fast, but on mobile it's slow: the
+main content takes too long to show up and the page keeps working in the background for a
+while. The server is a bit slow to answer on mobile too. Layout also moves around for real
+users, even though the lab test says it doesn't. So the real problems are on mobile and in
+the real-user data, not on a fast desktop.
 
-## PageSpeed Insights at `/`
+## Core Web Vitals — Field Data
 
-- **Performance**: 51
-- **Accessibility**: 93
-- **Best Practices**: 77
-- **SEO**: 92
+This is the real-user data from Chrome (last 28 days). I checked mobile and desktop because
+they're pretty different. Both fail the assessment, but for different reasons.
 
-- **First Contentful Paint** 2.2 s
-- **Largest Contentful Paint** 13.5 s
-- **Total Blocking Time** 720 ms
-- **Cumulative Layout Shift** 0
-- **Speed Index** 5.3 s
+### Mobile — Failed
 
-## Network baseline at `/`
+- Largest Contentful Paint (LCP): **3.4 s** — needs improvement
+- Interaction to Next Paint (INP): **218 ms** — needs improvement
+- Cumulative Layout Shift (CLS): **0.11** — needs improvement
+- First Contentful Paint (FCP): **1.9 s** — needs improvement
+- Time to First Byte (TTFB): **1.3 s** — needs improvement
 
-I checked the HAR for the homepage too. It has the first load and then the refresh, so I
-can compare what gets downloaded the first time and what happens when the page is loaded
-again.
+### Desktop — Failed
 
-### Initial load
+- Largest Contentful Paint (LCP): **2.1 s** — good
+- Interaction to Next Paint (INP): **94 ms** — good
+- Cumulative Layout Shift (CLS): **0.13** — needs improvement
+- First Contentful Paint (FCP): **1.2 s** — good
+- Time to First Byte (TTFB): **0.8 s** — needs improvement
 
-The first load makes **149 requests**, which is already a lot for a homepage.
+On desktop almost everything is green, but it still fails because of CLS (0.13). On mobile
+almost everything is orange.
 
-It transfers **1.87 MB**, but the total resource size is **5.83 MB**. So compression is
-doing a lot of work here: the browser downloads about **67.9% less** than the full
-resource size.
+## Lighthouse Lab Test
 
-### Soft refresh
+The lab run shows the same split — desktop is good, mobile is not.
 
-The refresh is the disappointing part. It makes **151 requests** and transfers **1.87
-MB** again. More exactly, it transfers 1,870,879 bytes, compared with 1,869,478 bytes on
-the first load.
+### Metrics
 
-So the cache reduction is basically **0%**. It is actually a tiny bit worse, around
-**-0.1%**, because the refresh transfers about 1.4 KB more than the first load.
+|                          | Mobile | Desktop |
+| ------------------------ | ------ | ------- |
+| First Contentful Paint   | 2.7 s  | 0.6 s   |
+| Largest Contentful Paint | 8.2 s  | 1.7 s   |
+| Total Blocking Time      | 200 ms | 70 ms   |
+| Cumulative Layout Shift  | 0      | 0       |
+| Speed Index              | 6.4 s  | 1.1 s   |
 
-That means this refresh is not really benefiting from cache. The HAR has no `304`
-responses and no `0 B` transferred resources. Almost every request in the refresh also
-has `Cache-Control: no-cache` and `Pragma: no-cache`, so the browser asks for the files
-again instead of just reusing them.
+Desktop performance score is **92** (green). On mobile, LCP (8.2 s) and Speed Index
+(6.4 s) are both red, which is what drags the mobile score down. My earlier Lighthouse run
+on the homepage gave Performance **51**, Accessibility **93**, Best Practices **77**, SEO
+**92**, and the mobile metrics here are the same shape (LCP and Speed Index in the red).
 
-### Resource type breakdown
+One thing to notice: the lab says CLS is **0**, but the field data says CLS is **0.11 /
+0.13**. So real users see the page move even though a clean lab run doesn't. That's worth
+keeping in mind.
 
-Most of the page is JavaScript. That matches the Lighthouse result: the page is not huge
-because of images, it is heavy because of code.
+## What this means
 
-JavaScript alone is **50 requests**, **1.44 MB transferred**, and **4.57 MB total
-resource size**. That is **76.9%** of everything transferred.
+Desktop is basically fine (score 92, LCP 1.7 s). The pain is on mobile: LCP is 8.2 s in the
+lab and 3.4 s for real users, Speed Index is 6.4 s, taps lag a bit (INP 218 ms), and the
+server takes 1.3 s to answer (TTFB). Blocking time is actually low (200 ms), so it's not
+that the main thread is jammed — it's that a lot is being downloaded and the content shows
+up late. Layout also shifts for real users. So the work is: get the mobile content to paint
+sooner, fix the layout shift, and speed up the server response on mobile.
 
-CSS is small next to that: **6 requests**, **20.3 KB transferred**, and **104.4 KB total
-resource size**.
+## Network at `/`
 
-Together, JS and CSS are **56 requests**, **1.46 MB transferred**, and **4.67 MB total
-resource size**. So code is about **77.9%** of the transferred data and **80.2%** of the
-total resource size.
+I looked at the homepage HAR (`harbour.space-1.har`). It has two loads in it: the first
+visit and a refresh, so I can compare them.
 
-Images are not the biggest byte problem here. There are many of them, **73 requests**,
-but they only transfer **173.3 KB** and have **300.7 KB** total resource size. So images
-are only **9.3%** of the downloaded data.
+### First load
 
-Fonts are **4 requests** and about **112.9 KB transferred**.
+The first load makes **149 requests**.
 
-Third-party stuff is still big. Counting Harbour.Space and its asset CDN as first-party,
-third parties are **25 requests**, **819.5 KB transferred**, and **2.57 MB total resource
-size**. That is **43.8%** of the downloaded data.
+It transfers **1.78 MB**, but the total resource size is **5.56 MB**. So compression is
+doing a lot of work here — the browser downloads about **67.9% less** than the full size.
+
+### What the bytes are
+
+This page is almost all code.
+
+- **JavaScript**: 52 requests, **1.37 MB** downloaded, 4.36 MB full size — **77%** of
+  everything downloaded.
+- **Images**: 73 requests but only **0.17 MB** (9.3%). The biggest image is just 29.5 KB,
+  so images are not the problem here.
+- **Fonts**: 4 requests, 0.11 MB.
+- **CSS**: 6 requests, 0.02 MB downloaded, 0.10 MB full size.
+
+JS and CSS together are **58 requests, 1.39 MB** downloaded and **4.46 MB** full size —
+about **78%** of the download and **80%** of the full size. So the page is heavy because of
+code, not because of images.
+
+### Third parties
+
+Counting Harbour.Space and its asset CDN as the site itself, third parties are **90
+requests and 0.92 MB** — about **51%** of the download. So half of what you download isn't
+even the site's own stuff.
+
+### Refresh
+
+The refresh is the disappointing part. It makes **151 requests** and transfers **1.78 MB**
+again — basically **+0.1%**, so it's not any lighter. There are **no `304` responses and
+nothing served from cache**, so the browser downloads almost everything a second time
+instead of reusing it.
 
 ### Compression notes
 
-JS and CSS are compressed. Most scripts use `gzip`, some use `br`, and some use `zstd`.
-The stylesheets use `gzip` or `br`.
-
-Images are mixed. Most of the image requests are SVG files and they are served with
-`gzip`. The binary images like `avif`, `gif`, and `png` are not compressed again with
-gzip or brotli, which is normal because those formats are already compressed.
-
-Fonts are not compressed again either, but `woff` and `woff2` are already compressed font
-formats.
+The code compresses well. Most files use `gzip`, a few use `zstd` or `br`, and that's why
+the download is 68% smaller than the full size. The requests with no compression are mostly
+images and fonts, which are already compressed formats, so they don't shrink again over the
+network. For those, caching matters more than gzip.
