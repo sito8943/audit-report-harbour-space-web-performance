@@ -20,8 +20,8 @@ I study and work at Harbour.Space, so I'm on this site all the time and I've not
 
 ## Reports
 
-- `baseline.md`: Initial Core Web Vitals and PageSpeed Insights results.
-- `findings.md`: Main performance issues found during the audit.
+- `baseline.md`: Core Web Vitals (field, mobile + desktop), Lighthouse lab, and the network baseline from the homepage HAR.
+- `findings.md`: Main performance issues found during the audit, plus what the site does well.
 
-> **TODO:** Fill `baseline.md` and `findings.md` with real PageSpeed Insights runs.
-> At least one target page must show a red (poor) score — `faculty` is the expected candidate.
+The homepage already shows a red score: mobile LCP is 8.2 s in the lab (and 3.4 s for real
+users), and mobile Speed Index is 6.4 s.
