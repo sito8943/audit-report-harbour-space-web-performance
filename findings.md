@@ -3,7 +3,9 @@
 These are from the homepage. The big thing I noticed is that desktop is fine but mobile is
 slow, and the real-user (field) data doesn't match the lab in a couple of places — the lab
 says layout is stable, but real users actually see it move. So I'm going by the field data
-where they disagree, because that's what people really get.
+where they disagree, because that's what people really get. The mobile lab numbers I lean on
+were taken on a throttled phone (Slow 4G, 4× slower CPU — the setup from class), not a fast
+laptop, so they match what a phone actually goes through.
 
 I tried to keep each of these as its own separate thing. When a few problems really just
 show up as the same metric, I put them together instead of listing them twice.

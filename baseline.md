@@ -36,6 +36,12 @@ almost everything is orange.
 
 The lab run shows the same split — desktop is good, mobile is not.
 
+I ran the mobile column with the throttling we used in class: Slow 4G on the network (around
+1.6 Mbps down, 750 Kbps up, 150 ms round trip) plus a 4× slower CPU, emulating a mid-range
+phone. Desktop is the normal desktop profile with no throttling. So the two aren't the same
+test — mobile is handicapped on purpose to match what a phone on a cell connection goes
+through, which is why I trust the mobile number more for real users.
+
 ### Metrics
 
 |                          | Mobile | Desktop |
