@@ -22,6 +22,7 @@ I study and work at Harbour.Space, so I'm on this site all the time and I've not
 
 - `baseline.md`: Core Web Vitals (field, mobile + desktop), Lighthouse lab, and the network baseline from the homepage HAR.
 - `findings.md`: Main performance issues found during the audit, plus what the site does well.
+- `prioritization.md`: The WSJF system I use to rank the fixes, and the resulting order.
 
 The homepage already shows a red score: mobile LCP is 8.2 s in the lab (and 3.4 s for real
 users), and mobile Speed Index is 6.4 s.
