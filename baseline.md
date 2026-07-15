@@ -116,3 +116,73 @@ The code compresses well. Most files use `gzip`, a few use `zstd` or `br`, and t
 the download is 68% smaller than the full size. The requests with no compression are mostly
 images and fonts, which are already compressed formats, so they don't shrink again over the
 network. For those, caching matters more than gzip.
+
+## Bundle outputs at `/`
+
+The HAR says how many bytes came down, not what's inside them, so for this part I went to
+the live page: pulled the homepage HTML, downloaded the chunks, and ran the Lighthouse
+coverage audits (unused JS/CSS, render-blocking, third-party summary) on the same
+throttled mobile setup.
+
+### JavaScript
+
+The site is a Next.js app (built with Turbopack), and it's bundled the way Next does it:
+the homepage HTML loads **31 hashed chunks**, all with `defer`, about **458 KB compressed**
+between them. That's route splitting — each page gets its own chunk plus shared ones — so
+the *architecture* is right, and the files are served with
+`cache-control: max-age=31536000, immutable` and hashed names, which is exactly what you
+want. This isn't the AP News "one bundle for the whole site" situation.
+
+The problem is what's inside. The biggest chunk is **100 KB compressed (316 KB minified)**
+— it carries react-dom and the shared framework code — and **51% of it is unused** on the
+homepage. So even with route splitting, half of the heaviest file is dead weight for this
+page. And the page still ships ~30 more chunks after it; the HAR counted 52 JS requests
+and 1.37 MB once everything (including third parties) loads.
+
+Source maps: **none**. No `sourceMappingURL` in the chunks and the `.map` URLs return 404.
+Should they exist? Here it's worse than a yes — the site runs **Sentry** for error
+tracking, and without source maps every error Sentry catches points into minified chunk
+names like `6f9c1591e392ddd4.js`. They're paying for error reporting and then making the
+reports unreadable.
+
+### CSS
+
+There's almost no CSS file to talk about: **one stylesheet, 6.5 KB (1.8 KB compressed)**.
+That's not because the site has no styles — it's because the styling is
+**styled-components** (the HTML has 217 `data-styled` markers), so the CSS lives inside
+the JavaScript and gets generated at runtime. Bundling-wise that means the "CSS bundle"
+question and the "too much JS" question are the same question here: every style costs
+main-thread JavaScript work on the phone's slow CPU instead of being a plain file the
+browser parses once. Of the styles it does emit, Lighthouse still flags **55% as unused**
+(~13 KB of inline styled blocks). Is it the right decision? For a mostly-static marketing
+site, runtime CSS-in-JS is paying an interactivity tax without getting much back — but
+migrating away is a rewrite, not a fix.
+
+### Images
+
+Mostly right. Raster images go through Next's optimizer (`/_next/image`), which serves
+**AVIF/WebP**, resizes to the requested width (q=75), and the `<img>` tags have `srcset`
+with a dozen widths, `sizes`, and lazy loading. I verified the optimizer output: a
+professor photo comes back as 8 KB AVIF instead of the 82 KB original PNG. So: multiple
+sizes and formats, yes, and yes it's the right decision.
+
+Two leaks though: **15 raster PNGs skip the optimizer** and load straight from the
+DigitalOcean Spaces bucket at full size, and the bucket itself is public — the original
+full-resolution files sit one URL away (that's how the optimizer reads them). Users mostly
+don't pay for it, but the bypassed PNGs do ship unoptimized.
+
+### Third parties
+
+The initial HTML contains **zero third-party script tags** — everything is injected at
+runtime by the app. What actually shows up in a fresh lab run, before touching the consent
+banner: **Sentry** (error tracking — including `replay.min.js`, the session-recording
+module, 48 KB with 51% unused), **CookieChimp** (the consent manager itself), and fonts
+CDN bits from JSDelivr. Blocking cost pre-consent is small (~30 ms).
+
+The heavy hitters from the HAR — Google Tag Manager, Google Ads, Facebook — arrive after
+consent, which is why the field experience is heavier than a clean lab run: **90 requests
+and 0.92 MB (51% of the download)** once the tags fire. So the loading strategy is
+"delayed behind consent", which is the right shape, with one exception: Sentry loads its
+session-replay recorder up front for everyone, before any consent, on a marketing page.
+That one seems both unnecessary (who replays anonymous homepage visits?) and the single
+biggest third-party blocker in the lab.

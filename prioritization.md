@@ -59,10 +59,14 @@ Scores for each finding are in `findings.md` next to the finding itself. Ranked:
 | 6 | Cache doesn't help on a second visit | 3 | 2 | 3 | 8 | 1 | **8.00** |
 | 1 | Main content shows up too late on mobile | 8 | 8 | 3 | 19 | 3 | **6.33** |
 | 3 | Layout moves around for real users | 5 | 5 | 2 | 12 | 2 | **6.00** |
+| 10 | No source maps (and Sentry can't read errors) | 1 | 1 | 3 | 5 | 1 | **5.00** |
 | 7 | Half the download is third-party | 5 | 3 | 5 | 13 | 3 | **4.33** |
+| 11 | Sentry replay records everyone up front | 3 | 2 | 3 | 8 | 2 | **4.00** |
 | 5 | Server is slow to answer on mobile | 5 | 3 | 2 | 10 | 3 | **3.33** |
+| 8 | Biggest chunk is half dead weight | 3 | 3 | 3 | 9 | 3 | **3.00** |
 | 2 | The page is basically all JavaScript | 8 | 5 | 5 | 18 | 8 | **2.25** |
 | 4 | Taps lag a bit on mobile | 3 | 3 | 2 | 8 | 5 | **1.60** |
+| 9 | The CSS is hiding inside the JavaScript | 3 | 2 | 3 | 8 | 8 | **1.00** |
 
 The order it produces makes sense to me: the cache fix is nearly free and pays back every
 repeat visit, the hero/LCP fix is the biggest user-facing win, and the full JavaScript
