@@ -57,6 +57,25 @@ Desktop performance score is **92** (green). On mobile, LCP (8.2 s) and Speed In
 on the homepage gave Performance **51**, Accessibility **93**, Best Practices **77**, SEO
 **92**, and the mobile metrics here are the same shape (LCP and Speed Index in the red).
 
+### Where the score comes from
+
+Lighthouse doesn't weigh the five metrics equally, so it's worth spelling out which ones
+actually sink the mobile score:
+
+| Metric | Weight | Mobile result | Threshold (good / poor) | Status |
+|---|---|---|---|---|
+| Total Blocking Time | 30% | 200 ms | ≤200 ms / >600 ms | good (right at the edge) |
+| Largest Contentful Paint | 25% | 8.2 s | ≤2.5 s / >4 s | poor (way past) |
+| Cumulative Layout Shift | 25% | 0 | ≤0.1 / >0.25 | good |
+| First Contentful Paint | 10% | 2.7 s | ≤1.8 s / >3 s | needs improvement |
+| Speed Index | 10% | 6.4 s | ≤3.4 s / >5.8 s | poor |
+
+CLS and TBT carry 55% of the score and both pass, which is what keeps the mobile score
+from being a disaster. The damage is concentrated in LCP — a quarter of the score, and
+it's more than 3× past the "poor" line — plus Speed Index. In other words: the page isn't
+janky and it isn't blocked, it's just late. That matches the field data too, where LCP is
+the metric real users fail hardest.
+
 One thing to notice: the lab says CLS is **0**, but the field data says CLS is **0.11 /
 0.13**. So real users see the page move even though a clean lab run doesn't. That's worth
 keeping in mind.
