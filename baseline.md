@@ -205,3 +205,105 @@ and 0.92 MB (51% of the download)** once the tags fire. So the loading strategy 
 session-replay recorder up front for everyone, before any consent, on a marketing page.
 That one seems both unnecessary (who replays anonymous homepage visits?) and the single
 biggest third-party blocker in the lab.
+
+## Coverage, frames, and layers at `/`
+
+For this part I measured the live homepage with the DevTools Coverage API and a scripted
+scroll test, on the same mobile emulation (390px viewport, 4× CPU throttle). Byte numbers
+here are **uncompressed** — that's what Coverage reports — so they're bigger than the
+transfer sizes in the network section.
+
+### Coverage — CSS
+
+**Does it extract critical CSS? No — it does the opposite.** The server-rendered HTML
+arrives with **~148 KB of inline `<style>` in the head**, and 128 KB of that is a single
+`data-styled` block: styled-components dumping *every* style it knows at SSR time. That's
+not critical CSS extraction (inline only what the first screen needs, load the rest
+later); it's inlining the whole page's CSS into every HTML response. It's part of why the
+document is 433 KB, and none of it can be cached — you re-download all your CSS with
+every page view.
+
+**How much unused CSS, and where from?** Of the CSS the Coverage tab can track, **~96% of
+first-party CSS is unused at load** (~89 of 93 KB). The sources, worst first:
+
+- Next.js CSS chunks (`c2f78067…css` 31 KB, `e1bd08c0…css` 19 KB, and three more) —
+  **100% unused**. These look like styles for routes/components that aren't on the
+  homepage at all, but get loaded anyway.
+- The inline styled-components blocks — mostly unused at load because they include styles
+  for components that only appear on interaction or never mount on mobile.
+- Third-party: the cookie-consent stylesheet from JSDelivr is **94% unused** (29.5 of
+  31.5 KB) — a whole theming framework for one banner.
+
+**Corrective finding:** stop shipping 100%-unused route CSS chunks on the homepage, and
+replace the 128 KB full-dump inline block with actual critical CSS (or at least move the
+non-critical part to a cacheable file).
+
+### Coverage — JS
+
+**How much unused JS, and where from?** **68% of first-party JavaScript is unused at
+load** — 1.30 MB of 1.92 MB uncompressed. Third-party adds another 117 KB unused (58%).
+The top offenders:
+
+- `8f29162a…js` — **404 KB unused of 454 KB (89%)**. One first-party chunk, alone, wastes
+  more bytes than most whole pages.
+- `f4eb6c19…js` — 120 KB unused of 200 KB (60%).
+- Sentry `replay.min.js` — 81 KB unused of 146 KB (55%), and as noted above it loads
+  pre-consent for everyone.
+- A tail of ~85–90%-unused chunks (`0a9ce183`, `a351d30b`, `ce7faa21`, `453c3759`…),
+  which smells like shared chunks that bundle many components "just in case".
+
+**Corrective finding:** the 89%-unused 454 KB chunk is the single best target on the whole
+site — split it or tree-shake it, and the JS story changes materially.
+
+### Frames — load, scroll, interaction
+
+I drove a continuous scroll through the full page (300 frames sampled, 4× CPU) and
+watched frame times and long tasks.
+
+- **Scrolling:** average frame **19 ms** (~52 fps) — mostly smooth — but **6 dropped
+  frames**, all of them severe (>50 ms), with the **worst at 382 ms**: a visible hitch of
+  a third of a second. The cause shows up right next to them: **two long tasks (108 ms
+  and 59 ms)** firing mid-scroll — that's lazy-mounted sections hydrating and
+  styled-components generating their CSS the moment they scroll into view, on the main
+  thread, while it's also trying to render frames.
+- **Load:** 3 long tasks totaling ~180 ms in this headless run (the full PSI run with
+  third parties showed much more — 720 ms TBT). Expected during load; not the problem.
+- **Are they excessive or unexpected?** Excessive, no — 6 of 300 frames. Unexpected, yes:
+  this is a static marketing page; there is no reason scrolling should ever cost 382 ms.
+  A frame budget blowout of 20× on scroll is work that shouldn't be on the main thread at
+  that moment.
+
+**Corrective finding:** hydration/style-generation work triggered by scroll should be
+scheduled off the interaction path (e.g. `requestIdleCallback`, smaller lazy boundaries,
+or pre-generating the CSS) so scrolling never pays for it.
+
+### Layers and animations
+
+I scanned every element's computed style for layer-forcing properties, and the CSS for
+the classic hacks:
+
+- **`will-change` on 14 elements.** Three are tooltips with `will-change: transform,
+  opacity` — defensible. But **eleven** are one repeated styled component
+  (`sc-7ac6c0ac-5`) declaring **`will-change: transition, opacity`** — and `transition`
+  is not an animatable property, so that value is half meaningless. Each of those still
+  forces a compositor layer that sits there permanently, because `will-change` in a
+  stylesheet never turns off.
+- **`translate3d(0,0,0)` hacks: present in the CSS**, coming from **Swiper** (the
+  carousel library) — `.swiper-wrapper { transform: translate3d(0,0,0) }` is the
+  old-school forced-layer trick, kept alive by the library, plus a `translate3d` on the
+  pagination bullets. At rest on mobile no element computes to a 3D transform (the
+  carousels weren't mounted in my run), so these fire only when a carousel is on screen.
+- **14 `position: fixed/sticky` elements** (header, cookie bar, chat button…), each of
+  which is also its own compositing candidate.
+- The animations I could inspect (tooltip fades, swiper transitions) are driven by
+  **transform/opacity — composition-triggered, the right kind**. I didn't find
+  layout-driven animations (`top/left/width`) in the shipped CSS.
+
+What I couldn't verify headless: the actual layer count in the Layers panel and whether
+any animation *feels* janky first-frame on a real device — that needs a manual DevTools
+pass (Layers panel + Rendering → Paint flashing), which is the remaining to-do here.
+
+**Corrective finding:** fix or remove the `will-change: transition, opacity` on the
+eleven `sc-7ac6c0ac-5` elements — as written it's a typo'd, permanently-on layer
+forcer × 11. If the intent was `transform`, say `transform`; if the element isn't
+animating most of the time, don't declare `will-change` in the stylesheet at all.
