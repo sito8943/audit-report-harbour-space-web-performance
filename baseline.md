@@ -307,3 +307,66 @@ pass (Layers panel + Rendering → Paint flashing), which is the remaining to-do
 eleven `sc-7ac6c0ac-5` elements — as written it's a typo'd, permanently-on layer
 forcer × 11. If the intent was `transform`, say `transform`; if the element isn't
 animating most of the time, don't declare `will-change` in the stylesheet at all.
+
+## Rendering strategies
+
+To figure out how each page is rendered I looked at the `__NEXT_DATA__` object Next.js
+embeds in every response (`gsp: true` means the page was built with `getStaticProps`,
+`gssp: true` means it was rendered per-request with `getServerSideProps`), plus the
+`cache-control` and `x-nextjs-cache` headers the server sends back.
+
+### What's used where
+
+Every page I probed tells the same story — the whole marketing site is **static
+generation with incremental regeneration (ISR)**:
+
+| Page | Route | Strategy | Cache headers |
+|---|---|---|---|
+| `/` (homepage) | `/` | SSG + ISR | `s-maxage=60, stale-while-revalidate=3600`, `x-nextjs-cache: HIT` |
+| `/faculty`, `/faculty/[id]` | static + dynamic | SSG + ISR | same, often `STALE` |
+| `/computer-science` (courses) | `/[campus]` | SSG + ISR | `s-maxage=60, stale-while-revalidate=31535940` (!) |
+| `/articles`, `/about`, `/admissions`, `/schedule` | various | SSG + ISR | `s-maxage=60, stale-while-revalidate=3600` |
+| `/account` | `/account/[[...slug]]` | **SSR** (`getServerSideProps`) | per-request |
+| unknown slugs | `/404` | prerendered static 404 | — |
+
+So: pre-rendered static HTML for everything public, regenerated in the background at
+most every 60 seconds, served from cache (`HIT`/`STALE`); and real server-side rendering
+only for `/account`, the one page that's actually personalized.
+
+### How this affects users, and the tradeoffs
+
+For users this is the good half of the site's performance story: TTFB is fast because
+nobody waits for a CMS query — the HTML is already built (the field TTFB issues on
+mobile are network, not rendering). Content is crawlable, and a CMS edit shows up within
+about a minute without a redeploy. The classic ISR tradeoff — a visitor can get up to
+60-seconds-stale content — is irrelevant for a university marketing site.
+
+The real tradeoff they're paying is different: **the static HTML is enormous, so the
+benefit of pre-rendering gets buried**. Each response carries the full styled-components
+CSS dump (~148 KB inline) plus the entire page content *twice* — once as HTML and once
+as the `__NEXT_DATA__` JSON used for hydration. On the homepage that JSON is 61 KB; on
+`/computer-science` it's **204 KB of a 305 KB document — two thirds of the HTML is the
+hydration payload**. The page is "static", but the phone still has to download all of
+it, then parse and hydrate it with 1.4 MB of JavaScript before it behaves like a page.
+That's how a pre-rendered site still ends up with an 8.2 s mobile LCP.
+
+### Is it the right choice? The best choice?
+
+Right choice: **yes**. SSG+ISR is exactly what a content site with a CMS should use, and
+SSR for the personalized `/account` page is also correct. I wouldn't change the
+strategy on any page.
+
+Best choice: **not as implemented**. Two corrective findings:
+
+1. **The hydration payload defeats the static rendering.** 204 KB of `__NEXT_DATA__` on
+   a course page means the CMS response is shipped wholesale to the client, even though
+   the HTML already contains it. Trim the props to what the client actually needs after
+   hydration (or move page content out of props entirely) — that alone could cut the
+   course-page document by roughly half and directly helps FCP/LCP on mobile.
+2. **The stale-while-revalidate windows are inconsistent and look accidental.** Most
+   pages can serve stale for 1 hour (`3600`), but course pages — the ones with
+   deadlines, dates and prices — can serve stale for **a year** (`31535940`, i.e.
+   365 days minus the 60 s). If that number is intentional, it's backwards (the most
+   time-sensitive pages have the loosest window); more likely someone computed
+   "1 year − s-maxage" once and it stuck. Pick explicit, per-content revalidation
+   windows: short for course/schedule pages, long for evergreen pages like `/about`.
