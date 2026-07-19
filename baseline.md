@@ -3,10 +3,14 @@
 ## Summary
 
 The homepage is a mixed bag. On desktop it's actually fast, but on mobile it's slow: the
-main content takes too long to show up and the page keeps working in the background for a
-while. The server is a bit slow to answer on mobile too. Layout also moves around for real
-users, even though the lab test says it doesn't. So the real problems are on mobile and in
-the real-user data, not on a fast desktop.
+main content takes way too long to show up. The server also takes a while to answer on
+mobile. Layout moves around for real users, even though the lab test says it doesn't. So
+the real problems are on mobile and in the real-user data, not on a fast desktop.
+
+(I originally wrote here that the page also "keeps working in the background for a
+while" — that came from my first Lighthouse run, where blocking time was 720 ms. The
+newer runs put TBT at 200 ms, so I've corrected it: the page isn't busy, the content is
+just late.)
 
 ## Core Web Vitals — Field Data
 
@@ -248,6 +252,13 @@ remember this one loads before consent for everyone), and then a tail of chunks 
 are all 85–90% unused, which looks like shared bundles carrying components "just in
 case".
 
+One thing that might read like a contradiction: the bundle section above says the
+biggest chunk is 316 KB minified and 51% unused. Both are true — that measurement came
+from an earlier run, the site redeployed in between (all the chunk hashes changed), and
+Coverage counts uncompressed bytes. So the numbers moved, but the story didn't: the
+heaviest shared chunk is mostly dead weight for the homepage, and in the newer build
+it's actually worse.
+
 The fix I'd start with is obvious: that 89%-unused chunk is the best single target on
 the whole site. Split it or tree-shake it and the JS numbers change for real.
 
@@ -333,10 +344,18 @@ hour (`stale-while-revalidate=3600`), but the course pages say
 ### How this affects users, and the tradeoffs
 
 This is honestly the good half of the site's performance story. Nobody waits for a CMS
-query — the HTML already exists when you ask for it — so TTFB is fast, the content is
-crawlable, and an edit in the CMS shows up within a minute or so without redeploying
-anything. The usual ISR tradeoff is that a visitor can get content that's up to a
-minute old, and for a university marketing site that just doesn't matter.
+query — the HTML already exists when you ask for it — so the server side of TTFB is
+fast, the content is crawlable, and an edit in the CMS shows up within a minute or so
+without redeploying anything. The usual ISR tradeoff is that a visitor can get content
+that's up to a minute old, and for a university marketing site that just doesn't matter.
+
+I do have to square this with finding 5, where I call the server slow on mobile —
+because the field data really does show a 1.3 s TTFB there. Having looked at both, I
+don't think those contradict each other: the same setup answers desktop users in 0.8 s,
+so the extra half second on mobile is mostly the cell network's round trip, not the
+server thinking. Pre-rendered pages can't fix a slow radio link. I'm noting it because
+an earlier draft just said "TTFB is fast" flat out, and next to the field numbers that
+looked wrong.
 
 The tradeoff they're actually paying is a different one: the static HTML is so heavy
 that the benefit of pre-rendering gets buried. Every response carries the ~148 KB
