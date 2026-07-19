@@ -208,102 +208,162 @@ biggest third-party blocker in the lab.
 
 ## Coverage, frames, and layers at `/`
 
-For this part I measured the live homepage with the DevTools Coverage API and a scripted
-scroll test, on the same mobile emulation (390px viewport, 4× CPU throttle). Byte numbers
-here are **uncompressed** — that's what Coverage reports — so they're bigger than the
-transfer sizes in the network section.
+For this part I went back to the live homepage with the Coverage tool and recorded a
+scroll through the page, on the same throttled mobile setup as before. One note on the
+numbers: Coverage reports uncompressed bytes, so everything here looks bigger than the
+transfer sizes from the network section. Same files, different unit.
 
 ### Coverage — CSS
 
-**Does it extract critical CSS? No — it does the opposite.** The server-rendered HTML
-arrives with **~148 KB of inline `<style>` in the head**, and 128 KB of that is a single
-`data-styled` block: styled-components dumping *every* style it knows at SSR time. That's
-not critical CSS extraction (inline only what the first screen needs, load the rest
-later); it's inlining the whole page's CSS into every HTML response. It's part of why the
-document is 433 KB, and none of it can be cached — you re-download all your CSS with
-every page view.
+First question was whether the site extracts critical CSS. It doesn't — if anything it
+does the opposite. The HTML shows up with about 148 KB of inline `<style>` in the head,
+and 128 KB of that is one giant `data-styled` block, which is styled-components dumping
+everything it knows at render time. Critical CSS would mean inlining just what the first
+screen needs and loading the rest later. This is the whole site's CSS pasted into every
+HTML response, it's a big part of why the document is 433 KB, and since it's inline none
+of it gets cached — you download all the CSS again on every page.
 
-**How much unused CSS, and where from?** Of the CSS the Coverage tab can track, **~96% of
-first-party CSS is unused at load** (~89 of 93 KB). The sources, worst first:
+As for how much is unused: of the CSS Coverage can track, about **96% of the first-party
+CSS is never used during load** (roughly 89 of 93 KB). Where it comes from:
 
-- Next.js CSS chunks (`c2f78067…css` 31 KB, `e1bd08c0…css` 19 KB, and three more) —
-  **100% unused**. These look like styles for routes/components that aren't on the
-  homepage at all, but get loaded anyway.
-- The inline styled-components blocks — mostly unused at load because they include styles
-  for components that only appear on interaction or never mount on mobile.
-- Third-party: the cookie-consent stylesheet from JSDelivr is **94% unused** (29.5 of
-  31.5 KB) — a whole theming framework for one banner.
+- Next.js CSS chunks (`c2f78067…css` at 31 KB, `e1bd08c0…css` at 19 KB, plus three
+  smaller ones) that are **100% unused**. As far as I can tell these are styles for
+  routes that aren't the homepage, loaded anyway.
+- The inline styled blocks themselves — a lot of it is for components that only show up
+  when you interact with something, or never mount on mobile at all.
+- The cookie banner's stylesheet from JSDelivr, 94% unused. It ships a whole theming
+  framework to draw one banner.
 
-**Corrective finding:** stop shipping 100%-unused route CSS chunks on the homepage, and
-replace the 128 KB full-dump inline block with actual critical CSS (or at least move the
-non-critical part to a cacheable file).
+What I'd fix here: stop loading route CSS the homepage doesn't use, and turn the 128 KB
+inline dump into actual critical CSS, with the rest in a normal cacheable file.
 
 ### Coverage — JS
 
-**How much unused JS, and where from?** **68% of first-party JavaScript is unused at
-load** — 1.30 MB of 1.92 MB uncompressed. Third-party adds another 117 KB unused (58%).
-The top offenders:
+**68% of the site's own JavaScript is unused during load** — 1.30 MB out of 1.92 MB
+uncompressed. Third parties add another ~117 KB of unused code on top. The list is
+topped by one file: `8f29162a…js`, where **404 KB of 454 KB (89%) never runs**. That
+single chunk wastes more bytes than a lot of complete pages. After it comes
+`f4eb6c19…js` (120 of 200 KB unused), Sentry's `replay.min.js` (81 of 146 KB, and
+remember this one loads before consent for everyone), and then a tail of chunks that
+are all 85–90% unused, which looks like shared bundles carrying components "just in
+case".
 
-- `8f29162a…js` — **404 KB unused of 454 KB (89%)**. One first-party chunk, alone, wastes
-  more bytes than most whole pages.
-- `f4eb6c19…js` — 120 KB unused of 200 KB (60%).
-- Sentry `replay.min.js` — 81 KB unused of 146 KB (55%), and as noted above it loads
-  pre-consent for everyone.
-- A tail of ~85–90%-unused chunks (`0a9ce183`, `a351d30b`, `ce7faa21`, `453c3759`…),
-  which smells like shared chunks that bundle many components "just in case".
-
-**Corrective finding:** the 89%-unused 454 KB chunk is the single best target on the whole
-site — split it or tree-shake it, and the JS story changes materially.
+The fix I'd start with is obvious: that 89%-unused chunk is the best single target on
+the whole site. Split it or tree-shake it and the JS numbers change for real.
 
 ### Frames — load, scroll, interaction
 
-I drove a continuous scroll through the full page (300 frames sampled, 4× CPU) and
-watched frame times and long tasks.
+I recorded a continuous scroll through the whole page (300 frames, 4× CPU) and watched
+the frame times.
 
-- **Scrolling:** average frame **19 ms** (~52 fps) — mostly smooth — but **6 dropped
-  frames**, all of them severe (>50 ms), with the **worst at 382 ms**: a visible hitch of
-  a third of a second. The cause shows up right next to them: **two long tasks (108 ms
-  and 59 ms)** firing mid-scroll — that's lazy-mounted sections hydrating and
-  styled-components generating their CSS the moment they scroll into view, on the main
-  thread, while it's also trying to render frames.
-- **Load:** 3 long tasks totaling ~180 ms in this headless run (the full PSI run with
-  third parties showed much more — 720 ms TBT). Expected during load; not the problem.
-- **Are they excessive or unexpected?** Excessive, no — 6 of 300 frames. Unexpected, yes:
-  this is a static marketing page; there is no reason scrolling should ever cost 382 ms.
-  A frame budget blowout of 20× on scroll is work that shouldn't be on the main thread at
-  that moment.
+Scrolling is mostly fine — 19 ms per frame on average, so around 52 fps — but **6 frames
+dropped hard**, all above 50 ms, and the worst one took **382 ms**. That's a visible
+hitch of a third of a second while scrolling a marketing page. The cause is sitting
+right next to them in the recording: two long tasks (108 ms and 59 ms) firing in the
+middle of the scroll. That's the lazy-mounted sections hydrating and styled-components
+generating their CSS right when they scroll into view, on the same thread that's trying
+to produce frames.
 
-**Corrective finding:** hydration/style-generation work triggered by scroll should be
-scheduled off the interaction path (e.g. `requestIdleCallback`, smaller lazy boundaries,
-or pre-generating the CSS) so scrolling never pays for it.
+During load itself I only caught 3 long tasks (~180 ms total) in this headless run — the
+full PSI run with all the third parties is much worse (720 ms of TBT), but load jank is
+expected; that's not the surprise here.
+
+Are the dropped frames excessive? Not really, 6 out of 300. Unexpected? Yes — there's no
+reason scrolling a static page should ever cost 382 ms. So what I'd correct: move the
+hydration and style-generation work off the scroll path — schedule it on idle, use
+smaller lazy boundaries, or pre-generate the CSS — so scrolling never pays for it.
 
 ### Layers and animations
 
-I scanned every element's computed style for layer-forcing properties, and the CSS for
-the classic hacks:
+I went through every element's computed style looking for layer-forcing properties, and
+through the CSS for the classic hacks.
 
-- **`will-change` on 14 elements.** Three are tooltips with `will-change: transform,
-  opacity` — defensible. But **eleven** are one repeated styled component
-  (`sc-7ac6c0ac-5`) declaring **`will-change: transition, opacity`** — and `transition`
-  is not an animatable property, so that value is half meaningless. Each of those still
-  forces a compositor layer that sits there permanently, because `will-change` in a
-  stylesheet never turns off.
-- **`translate3d(0,0,0)` hacks: present in the CSS**, coming from **Swiper** (the
-  carousel library) — `.swiper-wrapper { transform: translate3d(0,0,0) }` is the
-  old-school forced-layer trick, kept alive by the library, plus a `translate3d` on the
-  pagination bullets. At rest on mobile no element computes to a 3D transform (the
-  carousels weren't mounted in my run), so these fire only when a carousel is on screen.
-- **14 `position: fixed/sticky` elements** (header, cookie bar, chat button…), each of
-  which is also its own compositing candidate.
-- The animations I could inspect (tooltip fades, swiper transitions) are driven by
-  **transform/opacity — composition-triggered, the right kind**. I didn't find
-  layout-driven animations (`top/left/width`) in the shipped CSS.
+`will-change` shows up on 14 elements. Three are tooltips using `will-change: transform,
+opacity`, which is fair. The other **eleven are the same styled component
+(`sc-7ac6c0ac-5`) repeated, declaring `will-change: transition, opacity`** — and
+`transition` isn't something you can animate, so half of that value does nothing. It
+still costs though: each one forces a compositor layer that never goes away, because a
+`will-change` written in the stylesheet is permanently on.
 
-What I couldn't verify headless: the actual layer count in the Layers panel and whether
-any animation *feels* janky first-frame on a real device — that needs a manual DevTools
-pass (Layers panel + Rendering → Paint flashing), which is the remaining to-do here.
+The `translate3d(0,0,0)` trick is in the CSS too, but it's not theirs — it comes from
+Swiper, the carousel library, which still ships the old forced-layer hack on
+`.swiper-wrapper` and its pagination bullets. In my run no element actually computed to
+a 3D transform at rest (the carousels weren't mounted on mobile), so this only kicks in
+when a carousel is on screen. There are also 14 `position: fixed/sticky` elements
+(header, cookie bar, chat button…), each a compositing candidate of its own.
 
-**Corrective finding:** fix or remove the `will-change: transition, opacity` on the
-eleven `sc-7ac6c0ac-5` elements — as written it's a typo'd, permanently-on layer
-forcer × 11. If the intent was `transform`, say `transform`; if the element isn't
-animating most of the time, don't declare `will-change` in the stylesheet at all.
+The animations I could actually inspect — tooltip fades, the swiper transitions — run on
+transform and opacity, so they're composition-driven, which is the right kind. I didn't
+find anything animating layout properties like `top` or `width`.
+
+Two things I couldn't check headless: the real layer count in the Layers panel, and
+whether anything feels janky on first frame on an actual phone. That needs a manual
+DevTools pass (Layers panel plus paint flashing), which is still on my list.
+
+The correction for this set: fix or delete the `will-change: transition, opacity` on
+those eleven elements. As written it's a typo that keeps eleven layers alive forever.
+If they meant `transform`, write `transform` — and if the element isn't animating most
+of the time, it shouldn't declare `will-change` in the stylesheet at all.
+
+## Rendering strategies
+
+To figure out how each page gets rendered I used the `__NEXT_DATA__` object that Next.js
+leaves in every response — if it says `gsp: true` the page came out of `getStaticProps`,
+and `gssp: true` means it was rendered on the server per request — plus the
+`cache-control` and `x-nextjs-cache` headers.
+
+### What's used where
+
+I checked the homepage, the faculty list, a faculty profile, a course page, articles,
+about, admissions and the schedule, and they all came back the same way: `gsp: true`,
+`s-maxage=60, stale-while-revalidate`, and `x-nextjs-cache: HIT` or `STALE`. So the
+whole public site is **static generation with incremental regeneration (ISR)**: the
+HTML is pre-built, served from a cache, and rebuilt in the background at most once a
+minute.
+
+The one exception is `/account`, which reports `gssp: true` — real server-side
+rendering on every request. Makes sense, it's the only page that's personalized. And if
+you hit a URL that doesn't exist you get a prerendered static 404, so bad slugs don't
+cost a render either.
+
+One header stood out though: most pages are allowed to serve stale content for up to an
+hour (`stale-while-revalidate=3600`), but the course pages say
+`stale-while-revalidate=31535940` — that's a *year*. I'll come back to that.
+
+### How this affects users, and the tradeoffs
+
+This is honestly the good half of the site's performance story. Nobody waits for a CMS
+query — the HTML already exists when you ask for it — so TTFB is fast, the content is
+crawlable, and an edit in the CMS shows up within a minute or so without redeploying
+anything. The usual ISR tradeoff is that a visitor can get content that's up to a
+minute old, and for a university marketing site that just doesn't matter.
+
+The tradeoff they're actually paying is a different one: the static HTML is so heavy
+that the benefit of pre-rendering gets buried. Every response carries the ~148 KB
+styled-components dump from the coverage section, plus the whole page content *twice* —
+once as HTML and once again as the `__NEXT_DATA__` JSON that React uses to hydrate. On
+the homepage that JSON is 61 KB. On `/computer-science` it's **204 KB out of a 305 KB
+document** — two thirds of the "static" HTML is actually the hydration payload. The
+phone still has to download all of that and then run 1.4 MB of JavaScript before the
+page acts like a page. That's how a pre-rendered site ends up with an 8.2 s mobile LCP
+anyway.
+
+### Is it the right choice? Is it the best choice?
+
+Right choice, yes. SSG + ISR is exactly what I'd pick for a content site fed by a CMS,
+and doing SSR only on `/account` is also the correct call. I wouldn't change the
+strategy on any page — but I wouldn't call it the best choice *as implemented*, and
+that's where my two corrective findings are:
+
+1. **The hydration payload is defeating the static rendering.** Shipping 204 KB of
+   `__NEXT_DATA__` on a course page means the whole CMS response goes to the client
+   even though the same content is already in the HTML above it. Trimming those props
+   down to what the client actually needs after hydration could cut the course-page
+   document roughly in half, which goes straight into FCP and LCP on mobile.
+2. **The stale windows look like an accident.** Regular pages can serve stale for an
+   hour; the course pages — the ones with deadlines, dates and prices on them — can
+   serve stale for a year. If that's intentional it's backwards, because the most
+   time-sensitive pages got the loosest window. My guess is someone computed "one year
+   minus the 60 s" once and it stuck. Either way the fix is to set the revalidation
+   windows on purpose: short for courses and schedules, long for evergreen pages like
+   `/about`.
